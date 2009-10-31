@@ -93,17 +93,24 @@ if sys.argv[1] != "-run":
     sys.exit(1)    
 
 ############# parameters ######################
+CC_LABELS_FILE = None
+CC_BRANCHES_FILE = None
 
 from config import *
 
 CLEARTOOL = os.path.realpath(CLEARTOOL)
 CC_VOB_DIR = os.path.realpath(CC_VOB_DIR)
-CC_LABELS_FILE = os.path.realpath(CC_LABELS_FILE)
 CACHE_DIR = os.path.realpath(CACHE_DIR)
 SVN_AUTOPROPS_FILE = os.path.realpath(SVN_AUTOPROPS_FILE)
 SVN_DUMP_FILE = os.path.realpath(SVN_DUMP_FILE)
 HISTORY_FILE = os.path.realpath(HISTORY_FILE)
 
+if CC_LABELS_FILE:
+    CC_LABELS_FILE = os.path.realpath(CC_LABELS_FILE)    
+    
+if CC_BRANCHES_FILE:
+    CC_BRANCHES_FILE = os.path.realpath(CC_BRANCHES_FILE)        
+    
 ############# constants ######################
 
 CCVIEW_TMPFILE = CACHE_DIR + "/label_config_spec_tmp_cc2svnpy"
@@ -324,7 +331,7 @@ class CCHistoryParser:
             self.prevline = ""
             return None
         self.prevline = ""
-
+        
         # 20090729.162424;path/to/dir;/main/branch/another/1;checkin;(LABEL_1, LABEL2);;directory version;user1;Added file element file.cpp;
         
         ccRecord = CCRecord()
@@ -462,9 +469,14 @@ class FileSet(set):
         return self.root + "/" + path
                
 class Converter:
-    def __init__(self, outstream, labels, autoProps):
+    def __init__(self, outstream, labels, branches, autoProps):
         self.autoProps = autoProps        
-        self.labels = labels        
+        self.labels = labels                
+        if self.labels is not None:
+            self.checklabels = self.labels
+        else:
+            self.checklabels = set()    
+        self.branches = branches
         self.out = outstream
         
         self.svnTree = {} # branch/label -> FileSet
@@ -521,7 +533,7 @@ class Converter:
         first = True
         copyfromRev = self.svnRevNum-1
         for cclabel in ccRecord.labels:
-            if CONVERT_ALL_CC_LABELS or cclabel in self.labels:
+            if self.labels is None or cclabel in self.labels:
                 
                 if first:
                     self.dumpRevisionHeader()
@@ -536,8 +548,8 @@ class Converter:
                 
                 dumpSvnCopy(self.out, "file", copyfromPath, copyfromRev, copytoPath)
                 
-                if updateLabels and CONVERT_ALL_CC_LABELS:
-                    self.labels.add(cclabel) # will be used in completeLabels phase
+                if self.labels is None and updateLabels:
+                    self.checklabels.add(cclabel) # will be used in completeLabels phase
         pass
         
     def process(self, ccRecord):
@@ -566,6 +578,9 @@ class Converter:
         
         ccRecord.svnbranch = len(ccRecord.branchNames) > 0 and ccRecord.branchNames[-1] or "unknown" 
         ccRecord.svnpath = getSvnBranchPath(ccRecord.svnbranch) + "/" + ccRecord.path
+        
+        if self.branches is not None and ccRecord.svnbranch not in self.branches:
+            return            
                 
         self.setRevisionProps(ccRecord)
         
@@ -769,12 +784,14 @@ class Converter:
         # these are the files that were removed or renamed
     
         info("Checking labels")
-                
-        self.saveConfigSpec(CCVIEW_CONFIGSPEC)
         
         parser = CCHistoryParser()
         ccRecord = CCRecord()
-        for label in self.labels:   
+
+        if self.checklabels:
+            self.saveConfigSpec(CCVIEW_CONFIGSPEC)
+            
+        for label in self.checklabels:   
             info("Checking " + label)
                   
             self.setLabelSpec(label)
@@ -815,7 +832,8 @@ class Converter:
             except:
                 error(str(sys.exc_info()[1]))
         
-        self.setConfigSpec(CCVIEW_CONFIGSPEC)
+        if self.checklabels:
+            self.setConfigSpec(CCVIEW_CONFIGSPEC)
         pass
 
 ############# main functions ######################
@@ -832,47 +850,43 @@ def getCCHistory(filename):
     shellCmd(cmd, cwd=CC_VOB_DIR, outfile=filename)
     pass
 
-def readLabelsList(labelsListFilename):
-    info("Reading labels from " + labelsListFilename)
-    labels = set()
-    with open(labelsListFilename, 'r') as file:
-        for line in file:
-            labels.add(line.strip())
-    return labels
-
-def createSvnDump(labels, historyFileName, autoProps):
-    info("Processing ClearCase history, creating svn dump " + SVN_DUMP_FILE)
-    
-    dumpfile = open(SVN_DUMP_FILE, 'wb')
-    
-    converter = Converter(dumpfile, labels, autoProps)
-    
-    parser = CCHistoryParser()
-    
-    with open(historyFileName, 'rb') as historyFile: 
-        for line in rlines(historyFile): # reading lines in reverse order
-            ccRecord = parser.processLine(line)
-            if ccRecord:
-                converter.process(ccRecord)
-    
-    converter.completeLabels()
-    
-    dumpfile.close()
-    pass
+def readList(filename):
+    resList = None
+    if filename:
+        info("Reading " + filename)
+        resList = set()
+        with open(filename, 'r') as file:
+            for line in file:
+                resList.add(line.strip())
+    return resList
 
 def main():
     
     try:
     
-        labels = set()
-        if not CONVERT_ALL_CC_LABELS:
-            labels = readLabelsList(CC_LABELS_FILE)
+        labels = readList(CC_LABELS_FILE)
+        
+        branches = readList(CC_BRANCHES_FILE)
     
         getCCHistory(HISTORY_FILE)
         
         autoProps = SvnAutoProps(SVN_AUTOPROPS_FILE)
         
-        createSvnDump(labels, HISTORY_FILE, autoProps)    
+        info("Processing ClearCase history, creating svn dump " + SVN_DUMP_FILE)
+    
+        with open(SVN_DUMP_FILE, 'wb') as dumpfile:
+        
+            converter = Converter(dumpfile, labels, branches, autoProps)
+            
+            parser = CCHistoryParser()
+            
+            with open(HISTORY_FILE, 'rb') as historyFile: 
+                for line in rlines(historyFile): # reading lines in reverse order
+                    ccRecord = parser.processLine(line)
+                    if ccRecord:
+                        converter.process(ccRecord)
+            
+            converter.completeLabels()
         
         info("Completed")
             

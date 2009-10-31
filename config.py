@@ -29,10 +29,21 @@ PUT_CCLINKS_TO_BRANCH = "main"
 # the space between shell-pattern and equal sign '=' is mandatory
 SVN_AUTOPROPS_FILE = CONFIG_DIR + "/config.autoprops"
 
-# If CONVERT_ALL_CC_LABELS is True, the tool will convert all labels it finds in history of the current view
-# If CONVERT_ALL_CC_LABELS is False (recommended), the tool will transfer only those labels mentioned in CC_LABELS_FILE
-CONVERT_ALL_CC_LABELS = False 
+# If CC_LABELS_FILE is not defined, the tool will convert all labels it finds in history of the current view
+# If CC_LABELS_FILE is defined (recommended), the tool will transfer only those labels mentioned in file
+# If you don not want to transfer any labels, specify an empty file
+# file must contain one label per line, example: 
+# LABEL_1
+# LABEL_2 
 CC_LABELS_FILE = CONFIG_DIR + "/labels.txt"
+
+# If CC_BRANCHES_FILE is not defined, the tool will convert all branches it finds in history of the current view
+# If CC_BRANCHES_FILE is defined, the tool will transfer only those branches mentioned in file
+# If you don not want to transfer any branches, specify an empty file
+# file must contain one branch name per line (without slashes), example: 
+# main  
+# user_dev
+CC_BRANCHES_FILE = CONFIG_DIR + "/branches.txt"
 
 # If the tool finds the size of the file in cache is zero, it may try loading the file from ClearCase again.
 # This is to make sure zero size is not due to previous unsuccessful retrieving attempt.
