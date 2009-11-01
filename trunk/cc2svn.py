@@ -56,7 +56,9 @@ DESCRIPTION
     
     The tool provides the possibility to retry/ignore any ClearCase command if error occurs.
     The tool will put empty file to the cache if you ignore ClearCase retrieving operation error.
-    Make sure you know what you are doing when ignoring the error. 
+    Make sure you know what you are doing when ignoring the error.
+    
+    See config.py for options description. 
     
     Timing: CC repository of 5 GB (~120.000 revisions) is converted in ~1 hour using the pre-cached files.
 
@@ -92,9 +94,21 @@ if sys.argv[1] != "-run":
     print USAGE
     sys.exit(1)    
 
+############# constants ######################
+    
+HISTORY_FIELD_SEPARATOR = "@@@"    
+
+HISTORY_FORMAT = "%Nd;%En;%Vn;%o;%l;%a;%m;%u;%Nc;\n".replace(";", HISTORY_FIELD_SEPARATOR)    
+
+CC_DATE_FORMAT = "%Y%m%d.%H%M%S"
+SVN_DATE_FORMAT = "%Y-%m-%dT%H:%M:%S.000000Z"
+
+FILEREAD_CHUNKSIZE = 512
+
 ############# parameters ######################
 CC_LABELS_FILE = None
 CC_BRANCHES_FILE = None
+DUMP_SINCE_DATE = None
 
 from config import *
 
@@ -109,21 +123,13 @@ if CC_LABELS_FILE:
     CC_LABELS_FILE = os.path.realpath(CC_LABELS_FILE)    
     
 if CC_BRANCHES_FILE:
-    CC_BRANCHES_FILE = os.path.realpath(CC_BRANCHES_FILE)        
-    
-############# constants ######################
+    CC_BRANCHES_FILE = os.path.realpath(CC_BRANCHES_FILE)
+
+if DUMP_SINCE_DATE:            
+    DUMP_SINCE_DATE = time.strptime(DUMP_SINCE_DATE, CC_DATE_FORMAT)
 
 CCVIEW_TMPFILE = CACHE_DIR + "/label_config_spec_tmp_cc2svnpy"
 CCVIEW_CONFIGSPEC = CACHE_DIR + "/user_config_spec_tmp_cc2svnpy"
-    
-HISTORY_FIELD_SEPARATOR = "@@@"    
-
-HISTORY_FORMAT = "%Nd;%En;%Vn;%o;%l;%a;%m;%u;%Nc;\n".replace(";", HISTORY_FIELD_SEPARATOR)    
-
-CC_DATE_FORMAT = "%Y%m%d.%H%M%S"
-SVN_DATE_FORMAT = "%Y-%m-%dT%H:%M:%S.000000Z"
-
-FILEREAD_CHUNKSIZE = 512
 
 ############# utilities ######################
 
@@ -467,9 +473,29 @@ class FileSet(set):
         
     def getAbsolutePath(self, path):
         return self.root + "/" + path
+
+class WriteStream:
+    def __init__(self, file):
+        self.enabled = True
+        self.file = file
+        pass
+    
+    def enable(self):
+        self.enabled = True
+    
+    def disable(self):
+        self.enabled = False
+        
+    def disabled(self):
+        return self.enabled == False
+        
+    def write(self, data):
+        if self.enabled:
+            self.file.write(data)
+    
                
 class Converter:
-    def __init__(self, outstream, labels, branches, autoProps):
+    def __init__(self, dumpfile, labels, branches, autoProps):
         self.autoProps = autoProps        
         self.labels = labels                
         if self.labels is not None:
@@ -477,7 +503,7 @@ class Converter:
         else:
             self.checklabels = set()    
         self.branches = branches
-        self.out = outstream
+        self.out = WriteStream(dumpfile)
         
         self.svnTree = {} # branch/label -> FileSet
         self.ccTree = set() # (ccpath, ccrev)
@@ -486,6 +512,9 @@ class Converter:
         self.revProps = SvnRevisionProps()       
         
         self.out.write("SVN-fs-dump-format-version: 2\n\n")
+        
+        if DUMP_SINCE_DATE is not None:
+            self.out.disable()
         
         if SVN_CREATE_BRANCHES_TAGS_DIRS:
             self.dumpRevisionHeader()
@@ -582,6 +611,9 @@ class Converter:
         if self.branches is not None and ccRecord.svnbranch not in self.branches:
             return            
                 
+        if DUMP_SINCE_DATE is not None and self.out.disabled() and ccRecord.date > DUMP_SINCE_DATE:
+            self.out.enable()
+            
         self.setRevisionProps(ccRecord)
         
         if type == "version": # file
@@ -811,7 +843,13 @@ class Converter:
                         if (path, revision) not in self.ccTree:   
                             details = self.getFileDetails(ccrevfile)
                             ccRecord = parser.processLine(details)
-                            if ccRecord and ccRecord.type == "version": # file                          
+                            if ccRecord and ccRecord.type == "version": # file   
+                                
+                                if DUMP_SINCE_DATE is not None and ccRecord.date > DUMP_SINCE_DATE:
+                                    self.out.enable()
+                                else:
+                                    self.out.disable()
+                                                       
                                 info("Found file " + path + "@@" + revision)                            
                                 self.setRevisionProps(ccRecord)
                                 self.dumpRevisionHeader()

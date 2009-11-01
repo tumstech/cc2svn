@@ -1,6 +1,6 @@
 
 import os
-CONFIG_DIR = os.path.dirname(os.path.realpath(__file__))
+THIS_FILE_DIR = os.path.dirname(os.path.realpath(__file__))
 
 # The cleartool command full path
 CLEARTOOL = "/usr/atria/bin/cleartool"
@@ -27,23 +27,23 @@ PUT_CCLINKS_TO_BRANCH = "main"
 # You can add or change your mapping there 
 # The syntax is: shell-pattern = svnproperty=value;svnproperty=value;...
 # the space between shell-pattern and equal sign '=' is mandatory
-SVN_AUTOPROPS_FILE = CONFIG_DIR + "/config.autoprops"
+SVN_AUTOPROPS_FILE = THIS_FILE_DIR + "/config.autoprops"
 
 # If CC_LABELS_FILE is not defined, the tool will convert all labels it finds in history of the current view
 # If CC_LABELS_FILE is defined (recommended), the tool will transfer only those labels mentioned in file
-# If you don not want to transfer any labels, specify an empty file
+# If you do not want to transfer any labels, specify an empty file
 # file must contain one label per line, example: 
 # LABEL_1
 # LABEL_2 
-CC_LABELS_FILE = CONFIG_DIR + "/labels.txt"
+CC_LABELS_FILE = THIS_FILE_DIR + "/labels.txt"
 
 # If CC_BRANCHES_FILE is not defined, the tool will convert all branches it finds in history of the current view
 # If CC_BRANCHES_FILE is defined, the tool will transfer only those branches mentioned in file
-# If you don not want to transfer any branches, specify an empty file
+# If you do not want to transfer any branches, specify an empty file
 # file must contain one branch name per line (without slashes), example: 
 # main  
 # user_dev
-CC_BRANCHES_FILE = CONFIG_DIR + "/branches.txt"
+CC_BRANCHES_FILE = THIS_FILE_DIR + "/branches.txt"
 
 # If the tool finds the size of the file in cache is zero, it may try loading the file from ClearCase again.
 # This is to make sure zero size is not due to previous unsuccessful retrieving attempt.
@@ -58,4 +58,12 @@ SVN_DUMP_FILE = "svndump.txt"
 
 # ClearCase history file created by the tool
 HISTORY_FILE = "cchistory.txt"
+
+# DUMP_SINCE_DATE activates incremental dump mode. This should be used after the full dump mode only.
+# The idea is: you convert cc2svn on the day X without using this option, working in svn and ClearCase simultaneously
+# (do not commit the same changes in svn and CC), then create incremental dump using DUMP_SINCE_DATE=X option.
+# Dump will include revisions with date > DUMP_SINCE_DATE (strict greater) only.
+# Note: SVN_CREATE_BRANCHES_TAGS_DIRS is ignored in incremental mode
+# Date format is YYYYMMDD.hhmmss (the same as CC is using).  
+#DUMP_SINCE_DATE = "20010921.175059"
 
