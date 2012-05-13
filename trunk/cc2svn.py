@@ -79,6 +79,8 @@ LICENSING
 
 from __future__ import with_statement
 import os, subprocess, time, sys, hashlib, codecs, fnmatch
+import string
+import traceback
 
 USAGE = "Usage: %(cmd)s -run | -help" % { "cmd" : sys.argv[0] } 
 
@@ -144,6 +146,7 @@ def warn(text):
 
 def error(text):
     logMessage("ERROR: " + text)
+    traceback.print_exc(file=sys.stdout)
 
 
 def shellCmd(cmd, cwd=None, outfile=None):
@@ -234,6 +237,15 @@ def rlines(f, keepends=False):
             for line in lines:
                 yield line
     yield buf  # First line.
+
+def try_to_decode(s, encodings=('ascii', 'utf8', 'latin1')):
+    for encoding in encodings:
+        try:
+            return s.decode(encoding)
+        except UnicodeDecodeError:
+            pass
+    print "Failed to decode '%s', ignoring" % s
+    return s.decode('ascii', 'ignore')
     
 ############# heart of the script ######################
 
@@ -348,7 +360,7 @@ class CCHistoryParser:
         ccRecord.labels = self.parseLabels(fields[4]);
         ccRecord.type = fields[6];
         ccRecord.author = fields[7];
-        ccRecord.comment = fields[8];
+        ccRecord.comment = try_to_decode(fields[8])
         
         revisionParts = ccRecord.revision.split('/')
         if len(revisionParts) > 0:
@@ -366,7 +378,7 @@ def writeTextContentLength(out, len):
     out.write("Text-content-length: " + str(len) + "\n");
 
 def writeNodePath(out, nodePath):
-    out.write("Node-path: " + nodePath + "\n");
+    out.write("Node-path: " + try_to_decode(nodePath).encode('utf8') + "\n");
 
 def writeNodeKind(out, nodeKind):
     out.write("Node-kind: " + nodeKind + "\n");
@@ -764,7 +776,7 @@ class Converter:
                 else:
                     raise RuntimeError("File " + symlinkfile + " is not a symbolic link")
             else: 
-                cmd = CLEARTOOL + " get -to '" + localfile + "' '" + ccfile + "'"
+                cmd = CLEARTOOL + " get -to '" + string.replace(localfile, "'", "'\\''") + "' '" + string.replace(ccfile, "'", "'\\''") + "'"
                 (status, out) = shellCmd(cmd, cwd=CC_VOB_DIR)
                 if status == "ignore":
                     if not os.path.exists(localfile): open(localfile, 'w').close()
