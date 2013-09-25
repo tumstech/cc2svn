@@ -23,6 +23,8 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 #===============================================================================
+# 25.09.2013 Lukasz Tasz - enhanced handling of different location of the same element version
+#			   between manu labels - this is the best cc2svn tool I ever seen ;)
 """
 NAME
     cc2svn.py - converts ClearCase view files to SVN dump
@@ -100,7 +102,7 @@ if sys.argv[1] != "-run":
     
 HISTORY_FIELD_SEPARATOR = "@@@"    
 
-HISTORY_FORMAT = "%Nd;%En;%Vn;%o;%l;%a;%m;%u;%Nc;\n".replace(";", HISTORY_FIELD_SEPARATOR)    
+HISTORY_FORMAT = "%Nd;%En;%Vn;%o;%l;%a;%m;%u;%Nc;%Dn;\n".replace(";", HISTORY_FIELD_SEPARATOR)    
 
 CC_DATE_FORMAT = "%Y%m%d.%H%M%S"
 SVN_DATE_FORMAT = "%Y-%m-%dT%H:%M:%S.000000Z"
@@ -132,6 +134,8 @@ if DUMP_SINCE_DATE:
 
 CCVIEW_TMPFILE = CACHE_DIR + "/label_config_spec_tmp_cc2svnpy"
 CCVIEW_CONFIGSPEC = CACHE_DIR + "/user_config_spec_tmp_cc2svnpy"
+
+CC_LABELS_STRUCTURE = {}
 
 ############# utilities ######################
 
@@ -341,10 +345,10 @@ class CCHistoryParser:
         
         fields = line.split(HISTORY_FIELD_SEPARATOR)
         
-        if len(fields) < 10:
+        if len(fields) < 11:
             self.prevline = line;
             return None;
-        elif len(fields) > 10:
+        elif len(fields) > 11:
             error("Wrong history line: " + line)
             self.prevline = ""
             return None
@@ -361,6 +365,7 @@ class CCHistoryParser:
         ccRecord.type = fields[6];
         ccRecord.author = fields[7];
         ccRecord.comment = try_to_decode(fields[8])
+	ccRecord.dbid = fields[9];
         
         revisionParts = ccRecord.revision.split('/')
         if len(revisionParts) > 0:
@@ -575,19 +580,35 @@ class Converter:
         copyfromRev = self.svnRevNum-1
         for cclabel in ccRecord.labels:
             if self.labels is None or cclabel in self.labels:
-                
                 if first:
                     self.dumpRevisionHeader()
                     first = False
                     
                 fileSet = self.getTagFileset(cclabel)
-                    
                 self.createParentDirs(fileSet, ccRecord.path)
-                
                 copyfromPath = ccRecord.svnpath
-                copytoPath = fileSet.getAbsolutePath(ccRecord.path)
+		
+		if (not CC_LABELS_STRUCTURE.has_key(cclabel)):
+                    self.saveConfigSpec(CCVIEW_CONFIGSPEC)
+		    labelFilename = self.getLabelContent(cclabel)
+		    self.setLabelSpec(cclabel)
+		    labelList = {}
+		    with open(labelFilename, 'r') as file:
+		        for l in file:
+		            inode, fileLocationUnderLabel = l.strip().split(";")
+			    if labelList.has_key(inode):
+				    labelList[inode].append(fileLocationUnderLabel)
+			    else:
+                               first=[fileLocationUnderLabel]
+			       labelList[inode]=first
+		    CC_LABELS_STRUCTURE[cclabel]=labelList
+		    self.setConfigSpec(CCVIEW_CONFIGSPEC)
+		
+		for versionElement in  CC_LABELS_STRUCTURE[cclabel][ccRecord.dbid]:
+		    copytoPath = fileSet.getAbsolutePath(versionElement)
+                    dumpSvnCopy(self.out, "file", copyfromPath, copyfromRev, copytoPath)
+		
                 
-                dumpSvnCopy(self.out, "file", copyfromPath, copyfromRev, copytoPath)
                 
                 if self.labels is None and updateLabels:
                     self.checklabels.add(cclabel) # will be used in completeLabels phase
@@ -759,7 +780,6 @@ class Converter:
         localfileDir = os.path.dirname(localfile)
         if not os.path.exists(localfileDir):
             os.makedirs(localfileDir, mode=0777)
-         
         cacheExists = os.path.exists(localfile)
         if cacheExists and CHECK_ZEROSIZE_CACHEFILE:
             cacheExists = os.path.getsize(localfile) > 0
@@ -796,7 +816,7 @@ class Converter:
                 for line in file:
                     outStr += line
         else:
-            cmd = CLEARTOOL + " descr -fmt '" + HISTORY_FORMAT + "' " + ccrevfile
+            cmd = CLEARTOOL + " descr -fmt '" + HISTORY_FORMAT + "'  '" + ccrevfile + "'"
             (status, outStr) = shellCmd(cmd, cwd=CC_VOB_DIR)
             with open(localfile, 'w') as file:
                 file.write(outStr)                    
@@ -805,8 +825,18 @@ class Converter:
     def getLabelContent(self, label):       
         labelFilename = os.path.join(CACHE_DIR, label)
         if not os.path.exists(labelFilename):
+	    #cmd = CLEARTOOL + " find . -ver 'version(" + label + ")' -exec '/opt/ibm/RationalSDLC/clearcase/linux_x86/bin/cleartool describe -fmt \"%n;%Dn\n\" $CLEARCASE_PN'"
             cmd = CLEARTOOL + " find . -ver 'version(" + label + ")' -print"
             shellCmd(cmd, cwd=CC_VOB_DIR, outfile=labelFilename)
+	    os.rename(labelFilename, labelFilename+'.tmp')
+	    finalFileFd=os.open(labelFilename, os.O_RDWR|os.O_CREAT)
+            with open(labelFilename+'.tmp', 'r') as file:
+		for line in file:
+		    fd=os.open(CC_VOB_DIR + os.sep + line.strip(), os.O_RDONLY)
+		    info=os.fstat(fd)
+                    os.write(finalFileFd, str(info.st_ino)+';'+line)
+		    os.close(fd)
+	    os.close(finalFileFd)
         return labelFilename
     
     
@@ -826,6 +856,7 @@ class Converter:
     def completeLabels(self):
         # we need to add to labels those files that are not visible from ClearCase view
         # these are the files that were removed or renamed
+	return
     
         info("Checking labels")
         
@@ -837,7 +868,6 @@ class Converter:
             
         for label in self.checklabels:   
             info("Checking " + label)
-                  
             self.setLabelSpec(label)
             try:            
                 labelFilename = self.getLabelContent(label)            
@@ -856,11 +886,12 @@ class Converter:
                             details = self.getFileDetails(ccrevfile)
                             ccRecord = parser.processLine(details)
                             if ccRecord and ccRecord.type == "version": # file   
-                                
-                                if DUMP_SINCE_DATE is not None and ccRecord.date > DUMP_SINCE_DATE:
-                                    self.out.enable()
-                                else:
-                                    self.out.disable()
+
+				if DUMP_SINCE_DATE is not None:                                
+	                                if ccRecord.date > DUMP_SINCE_DATE:
+        	                            self.out.enable()
+                	                else:
+                        	            self.out.disable()
                                                        
                                 info("Found file " + path + "@@" + revision)                            
                                 self.setRevisionProps(ccRecord)
@@ -868,7 +899,7 @@ class Converter:
                                 fileSet = self.getTagFileset(label)
                                 self.createParentDirs(fileSet, ccRecord.path)
                                 
-                                ccRecord.svnpath = fileSet.getAbsolutePath(ccRecord.path)                      
+                                ccRecord.svnpath = fileSet.getAbsolutePath(ccRecord.path)
                                 self.dumpFile(ccRecord, "add")
                                 fileSet.add(ccRecord.path)
                                 
